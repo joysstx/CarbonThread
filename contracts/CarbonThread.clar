@@ -1,5 +1,6 @@
 ;; CarbonThread - Sustainable Supply Chain Transparency Platform
 ;; A blockchain-based solution for tracking and verifying sustainable products
+;; Now with carbon offset integration for carbon neutrality
 
 ;; Constants
 (define-constant contract-owner tx-sender)
@@ -9,6 +10,8 @@
 (define-constant err-invalid-input (err u103))
 (define-constant err-already-exists (err u104))
 (define-constant err-invalid-status (err u105))
+(define-constant err-insufficient-credits (err u106))
+(define-constant err-already-retired (err u107))
 
 ;; Data Variables
 (define-data-var next-product-id uint u1)
@@ -52,6 +55,20 @@
   }
 )
 
+(define-map carbon-offsets
+  { product-id: uint }
+  {
+    purchaser: principal,
+    credits-purchased: uint,
+    credits-retired: uint,
+    registry-id: (string-ascii 64),
+    project-name: (string-ascii 128),
+    purchase-timestamp: uint,
+    retirement-timestamp: (optional uint),
+    verified: bool
+  }
+)
+
 (define-map authorized-verifiers
   { verifier: principal }
   { authorized: bool }
@@ -68,6 +85,39 @@
 
 (define-read-only (get-supply-chain-step (product-id uint) (step-id uint))
   (map-get? supply-chain-steps { product-id: product-id, step-id: step-id })
+)
+
+(define-read-only (get-carbon-offset (product-id uint))
+  (map-get? carbon-offsets { product-id: product-id })
+)
+
+(define-read-only (is-carbon-neutral (product-id uint))
+  (let
+    (
+      (product-data (map-get? products { product-id: product-id }))
+      (offset-data (map-get? carbon-offsets { product-id: product-id }))
+    )
+    (match product-data
+      some-product
+        (match offset-data
+          some-offset
+            (let
+              (
+                (carbon-footprint (get carbon-footprint some-product))
+                (credits-retired (get credits-retired some-offset))
+                (verified (get verified some-offset))
+              )
+              (and 
+                verified
+                (>= credits-retired carbon-footprint)
+                (is-some (get retirement-timestamp some-offset))
+              )
+            )
+          false
+        )
+      false
+    )
+  )
 )
 
 (define-read-only (is-authorized-verifier (verifier principal))
@@ -103,6 +153,10 @@
   (> (len str) u0)
 )
 
+(define-private (is-valid-long-string (str (string-ascii 128)))
+  (> (len str) u0)
+)
+
 (define-private (is-valid-product-id (product-id uint))
   (> product-id u0)
 )
@@ -113,6 +167,10 @@
 
 (define-private (is-valid-principal (principal-addr principal))
   (not (is-eq principal-addr 'SP000000000000000000002Q6VF78))
+)
+
+(define-private (is-valid-credits (credits uint))
+  (> credits u0)
 )
 
 ;; Public functions
@@ -126,7 +184,6 @@
     (
       (product-id (var-get next-product-id))
       (current-height stacks-block-height)
-      (validated-carbon-footprint (if (> carbon-footprint u0) carbon-footprint u0))
     )
     (asserts! (is-valid-string product-name) err-invalid-input)
     (asserts! (is-valid-string category) err-invalid-input)
@@ -141,7 +198,7 @@
         product-name: product-name,
         category: category,
         origin-location: origin-location,
-        carbon-footprint: validated-carbon-footprint,
+        carbon-footprint: (if (>= carbon-footprint u0) carbon-footprint u0),
         sustainability-score: sustainability-score,
         created-at: current-height,
         status: "registered"
@@ -159,12 +216,9 @@
   (expires-at uint))
   (let
     (
-      (validated-product-id (if (> product-id u0) product-id u0))
-      (validated-cert-type (if (> (len cert-type) u0) cert-type "invalid"))
-      (validated-cert-hash (if (> (len cert-hash) u0) cert-hash 0x00))
-      (product-data (unwrap! (map-get? products { product-id: validated-product-id }) err-not-found))
+      (product-data (unwrap! (map-get? products { product-id: product-id }) err-not-found))
       (current-height stacks-block-height)
-      (existing-cert (map-get? certifications { product-id: validated-product-id, cert-type: validated-cert-type }))
+      (existing-cert (map-get? certifications { product-id: product-id, cert-type: cert-type }))
     )
     (asserts! (is-valid-product-id product-id) err-invalid-input)
     (asserts! (> (len cert-type) u0) err-invalid-input)
@@ -174,10 +228,10 @@
     (asserts! (is-none existing-cert) err-already-exists)
     
     (map-set certifications
-      { product-id: validated-product-id, cert-type: validated-cert-type }
+      { product-id: product-id, cert-type: cert-type }
       {
         issuer: tx-sender,
-        cert-hash: validated-cert-hash,
+        cert-hash: cert-hash,
         issued-at: current-height,
         expires-at: expires-at,
         verified: true
@@ -195,11 +249,9 @@
   (quality-score uint))
   (let
     (
-      (validated-product-id (if (> product-id u0) product-id u0))
-      (validated-step-id (if (>= step-id u0) step-id u0))
-      (product-data (unwrap! (map-get? products { product-id: validated-product-id }) err-not-found))
+      (product-data (unwrap! (map-get? products { product-id: product-id }) err-not-found))
       (current-height stacks-block-height)
-      (existing-step (map-get? supply-chain-steps { product-id: validated-product-id, step-id: validated-step-id }))
+      (existing-step (map-get? supply-chain-steps { product-id: product-id, step-id: step-id }))
     )
     (asserts! (is-valid-product-id product-id) err-invalid-input)
     (asserts! (is-valid-step-id step-id) err-invalid-input)
@@ -209,7 +261,7 @@
     (asserts! (is-none existing-step) err-already-exists)
     
     (map-set supply-chain-steps
-      { product-id: validated-product-id, step-id: validated-step-id }
+      { product-id: product-id, step-id: step-id }
       {
         processor: tx-sender,
         step-name: step-name,
@@ -226,17 +278,98 @@
 (define-public (verify-supply-chain-step (product-id uint) (step-id uint))
   (let
     (
-      (validated-product-id (if (> product-id u0) product-id u0))
-      (validated-step-id (if (>= step-id u0) step-id u0))
-      (step-data (unwrap! (map-get? supply-chain-steps { product-id: validated-product-id, step-id: validated-step-id }) err-not-found))
+      (step-data (unwrap! (map-get? supply-chain-steps { product-id: product-id, step-id: step-id }) err-not-found))
     )
     (asserts! (is-valid-product-id product-id) err-invalid-input)
     (asserts! (is-valid-step-id step-id) err-invalid-input)
     (asserts! (is-authorized-verifier tx-sender) err-unauthorized)
     
     (map-set supply-chain-steps
-      { product-id: validated-product-id, step-id: validated-step-id }
+      { product-id: product-id, step-id: step-id }
       (merge step-data { verified: true })
+    )
+    (ok true)
+  )
+)
+
+(define-public (purchase-carbon-offset
+  (product-id uint)
+  (credits-amount uint)
+  (registry-id (string-ascii 64))
+  (project-name (string-ascii 128)))
+  (let
+    (
+      (product-data (unwrap! (map-get? products { product-id: product-id }) err-not-found))
+      (current-height stacks-block-height)
+      (existing-offset (map-get? carbon-offsets { product-id: product-id }))
+      (manufacturer (get manufacturer product-data))
+    )
+    (asserts! (is-valid-product-id product-id) err-invalid-input)
+    (asserts! (is-valid-credits credits-amount) err-invalid-input)
+    (asserts! (is-valid-string registry-id) err-invalid-input)
+    (asserts! (is-valid-long-string project-name) err-invalid-input)
+    (asserts! (is-eq tx-sender manufacturer) err-unauthorized)
+    (asserts! (is-none existing-offset) err-already-exists)
+    
+    (map-set carbon-offsets
+      { product-id: product-id }
+      {
+        purchaser: tx-sender,
+        credits-purchased: credits-amount,
+        credits-retired: u0,
+        registry-id: registry-id,
+        project-name: project-name,
+        purchase-timestamp: current-height,
+        retirement-timestamp: none,
+        verified: false
+      }
+    )
+    (ok true)
+  )
+)
+
+(define-public (retire-carbon-credits (product-id uint) (credits-to-retire uint))
+  (let
+    (
+      (product-data (unwrap! (map-get? products { product-id: product-id }) err-not-found))
+      (offset-data (unwrap! (map-get? carbon-offsets { product-id: product-id }) err-not-found))
+      (current-height stacks-block-height)
+      (manufacturer (get manufacturer product-data))
+      (purchaser (get purchaser offset-data))
+      (credits-purchased (get credits-purchased offset-data))
+      (current-retired (get credits-retired offset-data))
+      (new-retired-total (+ current-retired credits-to-retire))
+    )
+    (asserts! (is-valid-product-id product-id) err-invalid-input)
+    (asserts! (is-valid-credits credits-to-retire) err-invalid-input)
+    (asserts! (is-eq tx-sender manufacturer) err-unauthorized)
+    (asserts! (is-eq tx-sender purchaser) err-unauthorized)
+    (asserts! (<= new-retired-total credits-purchased) err-insufficient-credits)
+    
+    (map-set carbon-offsets
+      { product-id: product-id }
+      (merge offset-data 
+        { 
+          credits-retired: new-retired-total,
+          retirement-timestamp: (some current-height)
+        }
+      )
+    )
+    (ok true)
+  )
+)
+
+(define-public (verify-carbon-offset (product-id uint))
+  (let
+    (
+      (offset-data (unwrap! (map-get? carbon-offsets { product-id: product-id }) err-not-found))
+    )
+    (asserts! (is-valid-product-id product-id) err-invalid-input)
+    (asserts! (is-authorized-verifier tx-sender) err-unauthorized)
+    
+    (map-set carbon-offsets
+      { product-id: product-id }
+      (merge offset-data { verified: true })
     )
     (ok true)
   )
@@ -245,8 +378,7 @@
 (define-public (update-product-status (product-id uint) (new-status (string-ascii 16)))
   (let
     (
-      (validated-product-id (if (> product-id u0) product-id u0))
-      (product-data (unwrap! (map-get? products { product-id: validated-product-id }) err-not-found))
+      (product-data (unwrap! (map-get? products { product-id: product-id }) err-not-found))
       (manufacturer (get manufacturer product-data))
     )
     (asserts! (is-valid-product-id product-id) err-invalid-input)
@@ -257,7 +389,7 @@
                   (is-eq new-status "verified")) err-invalid-status)
     
     (map-set products
-      { product-id: validated-product-id }
+      { product-id: product-id }
       (merge product-data { status: new-status })
     )
     (ok true)
