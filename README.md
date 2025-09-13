@@ -4,7 +4,7 @@ A blockchain-based supply chain transparency platform for sustainable product ve
 
 ## Overview
 
-CarbonThread enables manufacturers, verifiers, and consumers to track and verify the sustainability credentials of products throughout their entire supply chain journey. By leveraging blockchain technology, we create an immutable record of a product's environmental impact, certifications, and supply chain steps.
+CarbonThread enables manufacturers, verifiers, and consumers to track and verify the sustainability credentials of products throughout their entire supply chain journey. By leveraging blockchain technology, we create an immutable record of a product's environmental impact, certifications, and supply chain steps. Now featuring **carbon offset integration** to help products achieve carbon neutrality through verified carbon credits.
 
 ## Features
 
@@ -12,7 +12,9 @@ CarbonThread enables manufacturers, verifiers, and consumers to track and verify
 - **Certification Management**: Authorized verifiers can issue and manage sustainability certifications
 - **Supply Chain Tracking**: Track products through each step of the supply chain
 - **Verification System**: Independent verification of supply chain steps and certifications
-- **Transparency**: Public access to product sustainability data
+- **Carbon Offset Integration**: Purchase and link carbon credits to products for carbon neutrality
+- **Carbon Credit Management**: Track and verify carbon offset purchases and retirements
+- **Transparency**: Public access to product sustainability data and carbon offset status
 
 ## Smart Contract Functions
 
@@ -23,6 +25,8 @@ CarbonThread enables manufacturers, verifiers, and consumers to track and verify
 - `add-supply-chain-step` - Add a new step in the product's supply chain
 - `verify-supply-chain-step` - Verify a supply chain step (authorized verifiers only)
 - `update-product-status` - Update product status (manufacturer only)
+- `purchase-carbon-offset` - Purchase carbon credits to offset a product's emissions
+- `retire-carbon-credits` - Retire carbon credits for permanent offset
 - `authorize-verifier` - Authorize a new verifier (contract owner only)
 - `revoke-verifier` - Revoke verifier authorization (contract owner only)
 
@@ -31,6 +35,8 @@ CarbonThread enables manufacturers, verifiers, and consumers to track and verify
 - `get-product` - Retrieve product information
 - `get-certification` - Get certification details
 - `get-supply-chain-step` - Get supply chain step information
+- `get-carbon-offset` - Get carbon offset details for a product
+- `is-carbon-neutral` - Check if a product has achieved carbon neutrality
 - `is-authorized-verifier` - Check if a principal is an authorized verifier
 
 ## Installation
@@ -63,6 +69,24 @@ CarbonThread enables manufacturers, verifiers, and consumers to track and verify
   u1000000)
 ```
 
+### Purchase Carbon Offset
+
+```clarity
+(contract-call? .carbonthread purchase-carbon-offset 
+  u1 
+  u500 
+  "VCS-123456789" 
+  "Reforestation Project - Brazil")
+```
+
+### Retire Carbon Credits
+
+```clarity
+(contract-call? .carbonthread retire-carbon-credits 
+  u1 
+  u500)
+```
+
 ## Testing
 
 Run the test suite:
@@ -78,9 +102,21 @@ clarinet test
 4. Push to the branch
 5. Create a Pull Request
 
+## Carbon Offset Features
+
+The carbon offset integration allows:
+- **Offset Purchases**: Link verified carbon credits to products
+- **Credit Retirement**: Permanently retire credits for authentic carbon neutrality
+- **Transparency**: Track all offset transactions on-chain
+- **Verification**: Authorized verifiers can validate offset purchases
+- **Status Tracking**: Monitor carbon neutral status of products
+
 ## Roadmap
 
-See our [Future Features](#future-features) section for upcoming enhancements.
+- Enhanced carbon credit marketplace integration
+- Automated offset calculations based on supply chain data
+- Integration with major carbon registries
+- Mobile app for consumer verification
 
 ---
 
