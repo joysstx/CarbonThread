@@ -1,6 +1,6 @@
 ;; CarbonThread - Sustainable Supply Chain Transparency Platform
 ;; A blockchain-based solution for tracking and verifying sustainable products
-;; Now with carbon offset integration for carbon neutrality
+;; Now with carbon offset integration for carbon neutrality and consumer review system
 
 ;; Constants
 (define-constant contract-owner tx-sender)
@@ -12,9 +12,13 @@
 (define-constant err-invalid-status (err u105))
 (define-constant err-insufficient-credits (err u106))
 (define-constant err-already-retired (err u107))
+(define-constant err-already-reviewed (err u108))
+(define-constant err-not-purchased (err u109))
+(define-constant err-invalid-rating (err u110))
 
 ;; Data Variables
 (define-data-var next-product-id uint u1)
+(define-data-var next-purchase-id uint u1)
 (define-data-var platform-fee uint u1000) ;; 0.1% in basis points
 
 ;; Data Maps
@@ -28,7 +32,10 @@
     carbon-footprint: uint,
     sustainability-score: uint,
     created-at: uint,
-    status: (string-ascii 16)
+    status: (string-ascii 16),
+    total-reviews: uint,
+    average-rating: uint,
+    average-sustainability-rating: uint
   }
 )
 
@@ -74,6 +81,29 @@
   { authorized: bool }
 )
 
+(define-map product-purchases
+  { purchase-id: uint }
+  {
+    product-id: uint,
+    purchaser: principal,
+    purchase-timestamp: uint,
+    verified: bool
+  }
+)
+
+(define-map consumer-reviews
+  { product-id: uint, reviewer: principal }
+  {
+    purchase-id: uint,
+    overall-rating: uint,
+    sustainability-rating: uint,
+    quality-rating: uint,
+    review-text: (string-ascii 256),
+    review-timestamp: uint,
+    verified-purchase: bool
+  }
+)
+
 ;; Read-only functions
 (define-read-only (get-product (product-id uint))
   (map-get? products { product-id: product-id })
@@ -89,6 +119,14 @@
 
 (define-read-only (get-carbon-offset (product-id uint))
   (map-get? carbon-offsets { product-id: product-id })
+)
+
+(define-read-only (get-consumer-review (product-id uint) (reviewer principal))
+  (map-get? consumer-reviews { product-id: product-id, reviewer: reviewer })
+)
+
+(define-read-only (get-purchase (purchase-id uint))
+  (map-get? product-purchases { purchase-id: purchase-id })
 )
 
 (define-read-only (is-carbon-neutral (product-id uint))
@@ -120,6 +158,18 @@
   )
 )
 
+(define-read-only (has-verified-purchase (product-id uint) (purchaser principal))
+  (let
+    (
+      (review-data (map-get? consumer-reviews { product-id: product-id, reviewer: purchaser }))
+    )
+    (match review-data
+      some-review (get verified-purchase some-review)
+      false
+    )
+  )
+)
+
 (define-read-only (is-authorized-verifier (verifier principal))
   (let
     (
@@ -136,6 +186,10 @@
   (var-get next-product-id)
 )
 
+(define-read-only (get-next-purchase-id)
+  (var-get next-purchase-id)
+)
+
 (define-read-only (get-platform-fee)
   (var-get platform-fee)
 )
@@ -149,7 +203,15 @@
   (and (>= score u0) (<= score u100))
 )
 
+(define-private (is-valid-rating (rating uint))
+  (and (>= rating u1) (<= rating u5))
+)
+
 (define-private (is-valid-string (str (string-ascii 64)))
+  (> (len str) u0)
+)
+
+(define-private (is-valid-review-text (str (string-ascii 256)))
   (> (len str) u0)
 )
 
@@ -159,6 +221,10 @@
 
 (define-private (is-valid-product-id (product-id uint))
   (> product-id u0)
+)
+
+(define-private (is-valid-purchase-id (purchase-id uint))
+  (> purchase-id u0)
 )
 
 (define-private (is-valid-step-id (step-id uint))
@@ -171,6 +237,13 @@
 
 (define-private (is-valid-credits (credits uint))
   (> credits u0)
+)
+
+(define-private (calculate-new-average (current-average uint) (current-count uint) (new-rating uint))
+  (if (is-eq current-count u0)
+    new-rating
+    (/ (+ (* current-average current-count) new-rating) (+ current-count u1))
+  )
 )
 
 ;; Public functions
@@ -201,11 +274,113 @@
         carbon-footprint: (if (>= carbon-footprint u0) carbon-footprint u0),
         sustainability-score: sustainability-score,
         created-at: current-height,
-        status: "registered"
+        status: "registered",
+        total-reviews: u0,
+        average-rating: u0,
+        average-sustainability-rating: u0
       }
     )
     (var-set next-product-id (+ product-id u1))
     (ok product-id)
+  )
+)
+
+(define-public (record-purchase (product-id uint))
+  (let
+    (
+      (purchase-id (var-get next-purchase-id))
+      (current-height stacks-block-height)
+      (product-data (unwrap! (map-get? products { product-id: product-id }) err-not-found))
+    )
+    (asserts! (is-valid-product-id product-id) err-invalid-input)
+    (asserts! (is-valid-purchase-id purchase-id) err-invalid-input)
+    
+    (map-set product-purchases
+      { purchase-id: purchase-id }
+      {
+        product-id: product-id,
+        purchaser: tx-sender,
+        purchase-timestamp: current-height,
+        verified: false
+      }
+    )
+    (var-set next-purchase-id (+ purchase-id u1))
+    (ok purchase-id)
+  )
+)
+
+(define-public (verify-purchase (purchase-id uint))
+  (let
+    (
+      (purchase-data (unwrap! (map-get? product-purchases { purchase-id: purchase-id }) err-not-found))
+    )
+    (asserts! (is-valid-purchase-id purchase-id) err-invalid-input)
+    (asserts! (is-authorized-verifier tx-sender) err-unauthorized)
+    
+    (map-set product-purchases
+      { purchase-id: purchase-id }
+      (merge purchase-data { verified: true })
+    )
+    (ok true)
+  )
+)
+
+(define-public (add-consumer-review
+  (product-id uint)
+  (purchase-id uint)
+  (overall-rating uint)
+  (sustainability-rating uint)
+  (quality-rating uint)
+  (review-text (string-ascii 256)))
+  (let
+    (
+      (current-height stacks-block-height)
+      (product-data (unwrap! (map-get? products { product-id: product-id }) err-not-found))
+      (purchase-data (unwrap! (map-get? product-purchases { purchase-id: purchase-id }) err-not-found))
+      (existing-review (map-get? consumer-reviews { product-id: product-id, reviewer: tx-sender }))
+      (purchase-product-id (get product-id purchase-data))
+      (purchaser (get purchaser purchase-data))
+      (purchase-verified (get verified purchase-data))
+      (current-total-reviews (get total-reviews product-data))
+      (current-avg-rating (get average-rating product-data))
+      (current-avg-sustainability (get average-sustainability-rating product-data))
+      (new-avg-rating (calculate-new-average current-avg-rating current-total-reviews overall-rating))
+      (new-avg-sustainability (calculate-new-average current-avg-sustainability current-total-reviews sustainability-rating))
+    )
+    (asserts! (is-valid-product-id product-id) err-invalid-input)
+    (asserts! (is-valid-purchase-id purchase-id) err-invalid-input)
+    (asserts! (is-valid-rating overall-rating) err-invalid-rating)
+    (asserts! (is-valid-rating sustainability-rating) err-invalid-rating)
+    (asserts! (is-valid-rating quality-rating) err-invalid-rating)
+    (asserts! (is-valid-review-text review-text) err-invalid-input)
+    (asserts! (is-eq purchase-product-id product-id) err-invalid-input)
+    (asserts! (is-eq purchaser tx-sender) err-not-purchased)
+    (asserts! (is-none existing-review) err-already-reviewed)
+    
+    (map-set consumer-reviews
+      { product-id: product-id, reviewer: tx-sender }
+      {
+        purchase-id: purchase-id,
+        overall-rating: overall-rating,
+        sustainability-rating: sustainability-rating,
+        quality-rating: quality-rating,
+        review-text: review-text,
+        review-timestamp: current-height,
+        verified-purchase: purchase-verified
+      }
+    )
+    
+    (map-set products
+      { product-id: product-id }
+      (merge product-data 
+        {
+          total-reviews: (+ current-total-reviews u1),
+          average-rating: new-avg-rating,
+          average-sustainability-rating: new-avg-sustainability
+        }
+      )
+    )
+    (ok true)
   )
 )
 
