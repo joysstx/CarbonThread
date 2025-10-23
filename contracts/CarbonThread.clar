@@ -1,6 +1,6 @@
 ;; CarbonThread - Sustainable Supply Chain Transparency Platform
 ;; A blockchain-based solution for tracking and verifying sustainable products
-;; Now with carbon offset integration for carbon neutrality and consumer review system
+;; Now with carbon offset integration, consumer review system, and IoT sensor integration
 
 ;; Constants
 (define-constant contract-owner tx-sender)
@@ -15,10 +15,13 @@
 (define-constant err-already-reviewed (err u108))
 (define-constant err-not-purchased (err u109))
 (define-constant err-invalid-rating (err u110))
+(define-constant err-invalid-sensor-data (err u111))
+(define-constant err-sensor-not-authorized (err u112))
 
 ;; Data Variables
 (define-data-var next-product-id uint u1)
 (define-data-var next-purchase-id uint u1)
+(define-data-var next-sensor-reading-id uint u1)
 (define-data-var platform-fee uint u1000) ;; 0.1% in basis points
 
 ;; Data Maps
@@ -104,6 +107,43 @@
   }
 )
 
+(define-map authorized-iot-devices
+  { device-id: (string-ascii 64) }
+  {
+    device-owner: principal,
+    device-type: (string-ascii 32),
+    authorized: bool,
+    registered-at: uint
+  }
+)
+
+(define-map iot-sensor-readings
+  { reading-id: uint }
+  {
+    product-id: uint,
+    device-id: (string-ascii 64),
+    sensor-type: (string-ascii 32),
+    temperature: (optional int),
+    humidity: (optional uint),
+    location-lat: (optional int),
+    location-long: (optional int),
+    timestamp: uint,
+    verified: bool,
+    alert-triggered: bool
+  }
+)
+
+(define-map product-iot-thresholds
+  { product-id: uint }
+  {
+    min-temperature: int,
+    max-temperature: int,
+    min-humidity: uint,
+    max-humidity: uint,
+    monitoring-enabled: bool
+  }
+)
+
 ;; Read-only functions
 (define-read-only (get-product (product-id uint))
   (map-get? products { product-id: product-id })
@@ -127,6 +167,18 @@
 
 (define-read-only (get-purchase (purchase-id uint))
   (map-get? product-purchases { purchase-id: purchase-id })
+)
+
+(define-read-only (get-iot-device (device-id (string-ascii 64)))
+  (map-get? authorized-iot-devices { device-id: device-id })
+)
+
+(define-read-only (get-sensor-reading (reading-id uint))
+  (map-get? iot-sensor-readings { reading-id: reading-id })
+)
+
+(define-read-only (get-product-thresholds (product-id uint))
+  (map-get? product-iot-thresholds { product-id: product-id })
 )
 
 (define-read-only (is-carbon-neutral (product-id uint))
@@ -182,12 +234,28 @@
   )
 )
 
+(define-read-only (is-iot-device-authorized (device-id (string-ascii 64)))
+  (let
+    (
+      (device-data (map-get? authorized-iot-devices { device-id: device-id }))
+    )
+    (match device-data
+      some-device (get authorized some-device)
+      false
+    )
+  )
+)
+
 (define-read-only (get-next-product-id)
   (var-get next-product-id)
 )
 
 (define-read-only (get-next-purchase-id)
   (var-get next-purchase-id)
+)
+
+(define-read-only (get-next-sensor-reading-id)
+  (var-get next-sensor-reading-id)
 )
 
 (define-read-only (get-platform-fee)
@@ -237,6 +305,18 @@
 
 (define-private (is-valid-credits (credits uint))
   (> credits u0)
+)
+
+(define-private (is-valid-humidity (humidity uint))
+  (<= humidity u100)
+)
+
+(define-private (check-temperature-threshold (temp int) (min-temp int) (max-temp int))
+  (or (< temp min-temp) (> temp max-temp))
+)
+
+(define-private (check-humidity-threshold (humidity uint) (min-humidity uint) (max-humidity uint))
+  (or (< humidity min-humidity) (> humidity max-humidity))
 )
 
 (define-private (calculate-new-average (current-average uint) (current-count uint) (new-rating uint))
@@ -566,6 +646,172 @@
     (map-set products
       { product-id: product-id }
       (merge product-data { status: new-status })
+    )
+    (ok true)
+  )
+)
+
+(define-public (register-iot-device
+  (device-id (string-ascii 64))
+  (device-type (string-ascii 32)))
+  (let
+    (
+      (current-height stacks-block-height)
+      (existing-device (map-get? authorized-iot-devices { device-id: device-id }))
+    )
+    (asserts! (is-valid-string device-id) err-invalid-input)
+    (asserts! (> (len device-type) u0) err-invalid-input)
+    (asserts! (is-none existing-device) err-already-exists)
+    
+    (map-set authorized-iot-devices
+      { device-id: device-id }
+      {
+        device-owner: tx-sender,
+        device-type: device-type,
+        authorized: false,
+        registered-at: current-height
+      }
+    )
+    (ok true)
+  )
+)
+
+(define-public (authorize-iot-device (device-id (string-ascii 64)))
+  (let
+    (
+      (device-data (unwrap! (map-get? authorized-iot-devices { device-id: device-id }) err-not-found))
+    )
+    (asserts! (is-valid-string device-id) err-invalid-input)
+    (asserts! (is-authorized-verifier tx-sender) err-unauthorized)
+    
+    (map-set authorized-iot-devices
+      { device-id: device-id }
+      (merge device-data { authorized: true })
+    )
+    (ok true)
+  )
+)
+
+(define-public (revoke-iot-device (device-id (string-ascii 64)))
+  (let
+    (
+      (device-data (unwrap! (map-get? authorized-iot-devices { device-id: device-id }) err-not-found))
+    )
+    (asserts! (is-valid-string device-id) err-invalid-input)
+    (asserts! (is-authorized-verifier tx-sender) err-unauthorized)
+    
+    (map-set authorized-iot-devices
+      { device-id: device-id }
+      (merge device-data { authorized: false })
+    )
+    (ok true)
+  )
+)
+
+(define-public (set-product-monitoring-thresholds
+  (product-id uint)
+  (min-temp int)
+  (max-temp int)
+  (min-hum uint)
+  (max-hum uint))
+  (let
+    (
+      (product-data (unwrap! (map-get? products { product-id: product-id }) err-not-found))
+      (manufacturer (get manufacturer product-data))
+    )
+    (asserts! (is-valid-product-id product-id) err-invalid-input)
+    (asserts! (< min-temp max-temp) err-invalid-input)
+    (asserts! (< min-hum max-hum) err-invalid-input)
+    (asserts! (is-valid-humidity max-hum) err-invalid-input)
+    (asserts! (is-eq tx-sender manufacturer) err-unauthorized)
+    
+    (map-set product-iot-thresholds
+      { product-id: product-id }
+      {
+        min-temperature: min-temp,
+        max-temperature: max-temp,
+        min-humidity: min-hum,
+        max-humidity: max-hum,
+        monitoring-enabled: true
+      }
+    )
+    (ok true)
+  )
+)
+
+(define-public (record-sensor-data
+  (product-id uint)
+  (device-id (string-ascii 64))
+  (sensor-type (string-ascii 32))
+  (temperature (optional int))
+  (humidity (optional uint))
+  (location-lat (optional int))
+  (location-long (optional int)))
+  (let
+    (
+      (reading-id (var-get next-sensor-reading-id))
+      (current-height stacks-block-height)
+      (product-data (unwrap! (map-get? products { product-id: product-id }) err-not-found))
+      (device-data (unwrap! (map-get? authorized-iot-devices { device-id: device-id }) err-not-found))
+      (device-authorized (get authorized device-data))
+      (threshold-data (map-get? product-iot-thresholds { product-id: product-id }))
+      (threshold-check (map-get? product-iot-thresholds { product-id: product-id }))
+      (alert-status (match threshold-check
+        some-threshold
+          (let
+            (
+              (min-temp (get min-temperature some-threshold))
+              (max-temp (get max-temperature some-threshold))
+              (min-hum (get min-humidity some-threshold))
+              (max-hum (get max-humidity some-threshold))
+              (temp-alert (match temperature
+                some-temp (check-temperature-threshold some-temp min-temp max-temp)
+                false))
+              (hum-alert (match humidity
+                some-hum (check-humidity-threshold some-hum min-hum max-hum)
+                false))
+            )
+            (or temp-alert hum-alert)
+          )
+        false))
+    )
+    (asserts! (is-valid-product-id product-id) err-invalid-input)
+    (asserts! (is-valid-string device-id) err-invalid-input)
+    (asserts! (> (len sensor-type) u0) err-invalid-input)
+    (asserts! device-authorized err-sensor-not-authorized)
+    (asserts! (match humidity some-h (is-valid-humidity some-h) true) err-invalid-sensor-data)
+    
+    (map-set iot-sensor-readings
+      { reading-id: reading-id }
+      {
+        product-id: product-id,
+        device-id: device-id,
+        sensor-type: sensor-type,
+        temperature: temperature,
+        humidity: humidity,
+        location-lat: location-lat,
+        location-long: location-long,
+        timestamp: current-height,
+        verified: false,
+        alert-triggered: alert-status
+      }
+    )
+    (var-set next-sensor-reading-id (+ reading-id u1))
+    (ok reading-id)
+  )
+)
+
+(define-public (verify-sensor-reading (reading-id uint))
+  (let
+    (
+      (reading-data (unwrap! (map-get? iot-sensor-readings { reading-id: reading-id }) err-not-found))
+    )
+    (asserts! (> reading-id u0) err-invalid-input)
+    (asserts! (is-authorized-verifier tx-sender) err-unauthorized)
+    
+    (map-set iot-sensor-readings
+      { reading-id: reading-id }
+      (merge reading-data { verified: true })
     )
     (ok true)
   )

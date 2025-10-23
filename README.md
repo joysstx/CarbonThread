@@ -4,7 +4,7 @@ A blockchain-based supply chain transparency platform for sustainable product ve
 
 ## Overview
 
-CarbonThread enables manufacturers, verifiers, and consumers to track and verify the sustainability credentials of products throughout their entire supply chain journey. By leveraging blockchain technology, we create an immutable record of a product's environmental impact, certifications, and supply chain steps. Now featuring **carbon offset integration** to help products achieve carbon neutrality through verified carbon credits and **consumer review system** for authentic sustainability feedback from verified purchasers.
+CarbonThread enables manufacturers, verifiers, and consumers to track and verify the sustainability credentials of products throughout their entire supply chain journey. By leveraging blockchain technology, we create an immutable record of a product's environmental impact, certifications, and supply chain steps. Now featuring **carbon offset integration** to help products achieve carbon neutrality through verified carbon credits, **consumer review system** for authentic sustainability feedback from verified purchasers, and **IoT sensor integration** for real-time environmental monitoring during transport and storage.
 
 ## Features
 
@@ -16,7 +16,10 @@ CarbonThread enables manufacturers, verifiers, and consumers to track and verify
 - **Carbon Credit Management**: Track and verify carbon offset purchases and retirements
 - **Consumer Review System**: Verified purchasers can rate and review products' actual sustainability performance
 - **Purchase Verification**: Track and verify product purchases for authentic reviews
-- **Transparency**: Public access to product sustainability data, carbon offset status, and consumer reviews
+- **IoT Sensor Integration**: Connect IoT devices to automatically track environmental conditions during transport
+- **Real-time Monitoring**: Monitor temperature, humidity, and location data from authorized IoT sensors
+- **Alert System**: Automatic alerts when environmental thresholds are breached
+- **Transparency**: Public access to product sustainability data, carbon offset status, consumer reviews, and sensor readings
 
 ## Smart Contract Functions
 
@@ -39,6 +42,14 @@ CarbonThread enables manufacturers, verifiers, and consumers to track and verify
 - `verify-purchase` - Verify a product purchase (authorized verifiers only)
 - `add-consumer-review` - Add a consumer review with sustainability ratings (verified purchasers only)
 
+#### IoT Sensor Management
+- `register-iot-device` - Register a new IoT sensor device
+- `authorize-iot-device` - Authorize an IoT device to submit sensor data (authorized verifiers only)
+- `revoke-iot-device` - Revoke IoT device authorization (authorized verifiers only)
+- `set-product-monitoring-thresholds` - Set environmental thresholds for products (manufacturer only)
+- `record-sensor-data` - Record environmental sensor readings from authorized IoT devices
+- `verify-sensor-reading` - Verify sensor reading authenticity (authorized verifiers only)
+
 #### Administration
 - `authorize-verifier` - Authorize a new verifier (contract owner only)
 - `revoke-verifier` - Revoke verifier authorization (contract owner only)
@@ -52,9 +63,13 @@ CarbonThread enables manufacturers, verifiers, and consumers to track and verify
 - `get-carbon-offset` - Get carbon offset details for a product
 - `get-consumer-review` - Get specific consumer review
 - `get-purchase` - Get purchase record details
+- `get-iot-device` - Get IoT device information and authorization status
+- `get-sensor-reading` - Get specific sensor reading data
+- `get-product-thresholds` - Get environmental monitoring thresholds for a product
 - `is-carbon-neutral` - Check if a product has achieved carbon neutrality
 - `has-verified-purchase` - Check if user has verified purchase for reviews
 - `is-authorized-verifier` - Check if a principal is an authorized verifier
+- `is-iot-device-authorized` - Check if an IoT device is authorized
 
 ## Installation
 
@@ -94,6 +109,38 @@ CarbonThread enables manufacturers, verifiers, and consumers to track and verify
   "Excellent sustainable product, matches all claims!")
 ```
 
+### Register IoT Device
+
+```clarity
+(contract-call? .carbonthread register-iot-device 
+  "TEMP-SENSOR-001" 
+  "Temperature Monitor")
+```
+
+### Set Environmental Thresholds
+
+```clarity
+(contract-call? .carbonthread set-product-monitoring-thresholds 
+  u1        ;; product-id
+  2         ;; min-temperature (°C)
+  8         ;; max-temperature (°C)
+  u30       ;; min-humidity (%)
+  u70)      ;; max-humidity (%)
+```
+
+### Record Sensor Data
+
+```clarity
+(contract-call? .carbonthread record-sensor-data 
+  u1                        ;; product-id
+  "TEMP-SENSOR-001"        ;; device-id
+  "temperature-humidity"    ;; sensor-type
+  (some 5)                 ;; temperature (°C)
+  (some u45)               ;; humidity (%)
+  (some 40712345)          ;; location-lat
+  (some -74006789))        ;; location-long
+```
+
 ### Add Certification
 
 ```clarity
@@ -129,13 +176,30 @@ Run the test suite:
 clarinet test
 ```
 
-## Contributing
+## IoT Sensor Integration Features
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Create a Pull Request
+The IoT sensor integration enables:
+- **Device Registration**: Register and authorize IoT sensor devices on-chain
+- **Real-time Data Collection**: Automatically record temperature, humidity, and location data
+- **Threshold Monitoring**: Set custom environmental thresholds for each product
+- **Automatic Alerts**: System triggers alerts when conditions exceed safe thresholds
+- **Data Verification**: Authorized verifiers can validate sensor readings
+- **Immutable Records**: All sensor data permanently recorded on blockchain
+- **Transport Monitoring**: Track environmental conditions throughout the supply chain
+- **Quality Assurance**: Ensure products maintained proper conditions during transit
+
+### Supported Sensor Types
+- **Temperature Sensors**: Monitor ambient and product temperature
+- **Humidity Sensors**: Track moisture levels during transport
+- **GPS/Location Sensors**: Record geographic coordinates during transit
+- **Multi-function Sensors**: Combined environmental monitoring devices
+
+### IoT Use Cases
+1. **Cold Chain Monitoring**: Ensure perishable goods stay within temperature range
+2. **Quality Control**: Verify products maintained optimal conditions
+3. **Compliance Verification**: Prove adherence to storage and transport requirements
+4. **Damage Prevention**: Early warning system for environmental breaches
+5. **Insurance Claims**: Provide verifiable proof of proper handling
 
 ## Consumer Review Features
 
@@ -170,6 +234,47 @@ The carbon offset integration allows:
 - Advanced review analytics and sentiment analysis
 - Integration with e-commerce platforms for automatic purchase recording
 - Reputation system for reviewers
+- Machine learning for sensor data anomaly detection
+- Integration with major IoT platforms (AWS IoT, Azure IoT Hub)
+- Predictive analytics for environmental condition forecasting
+- Real-time dashboard for supply chain monitoring
+- Automated compliance reporting
+
+## Technical Architecture
+
+### IoT Integration Architecture
+```
+IoT Devices → Data Gateway → Smart Contract → Blockchain
+                    ↓
+              Threshold Check
+                    ↓
+              Alert Generation
+```
+
+### Data Flow
+1. IoT device collects environmental data
+2. Data transmitted to authorized gateway
+3. Smart contract validates device authorization
+4. Threshold checks performed automatically
+5. Data recorded immutably on blockchain
+6. Alerts triggered if thresholds breached
+7. Verifiers can validate readings
+
+## Security Considerations
+
+- Only authorized IoT devices can submit sensor data
+- All sensor readings require verification by authorized verifiers
+- Environmental thresholds can only be set by manufacturers
+- Device authorization managed by trusted verifiers
+- Immutable audit trail for all sensor data
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push to the branch
+5. Create a Pull Request
 
 ---
 
