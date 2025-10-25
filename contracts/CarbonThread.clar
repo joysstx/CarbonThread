@@ -17,6 +17,7 @@
 (define-constant err-invalid-rating (err u110))
 (define-constant err-invalid-sensor-data (err u111))
 (define-constant err-sensor-not-authorized (err u112))
+(define-constant err-invalid-batch (err u113))
 
 ;; Data Variables
 (define-data-var next-product-id uint u1)

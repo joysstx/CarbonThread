@@ -19,6 +19,7 @@ CarbonThread enables manufacturers, verifiers, and consumers to track and verify
 - **IoT Sensor Integration**: Connect IoT devices to automatically track environmental conditions during transport
 - **Real-time Monitoring**: Monitor temperature, humidity, and location data from authorized IoT sensors
 - **Alert System**: Automatic alerts when environmental thresholds are breached
+- **Batch Tracking**: Group products into batches for streamlined management and recalls
 - **Transparency**: Public access to product sustainability data, carbon offset status, consumer reviews, and sensor readings
 
 ## Smart Contract Functions
